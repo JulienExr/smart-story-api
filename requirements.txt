@@ -1,0 +1,8 @@
+wheel
+opencv-contrib-python
+torch
+torchvision
+Pillow
+matplotlib
+clip
+imagehash
