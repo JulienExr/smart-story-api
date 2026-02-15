@@ -1,8 +1,9 @@
 wheel
+git+https://github.com/openai/CLIP.git
 opencv-contrib-python
 torch
 torchvision
 Pillow
 matplotlib
-clip
 imagehash
+tqdm
