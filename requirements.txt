@@ -7,3 +7,6 @@ Pillow
 matplotlib
 imagehash
 tqdm
+rembg[gpu]
+transformers
+safetensors
