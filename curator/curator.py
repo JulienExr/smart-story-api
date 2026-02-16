@@ -34,11 +34,13 @@ TARGET_WIDTH = 720
 hf_logging.set_verbosity_error()
 
 def PIL_to_cv2(image):
+    """ convert a PIL image to an OpenCV image """
     image = image.convert("RGB")
     open_cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
     return open_cv_image
 
 def get_brisque_score(image):
+    """ calculate the BRISQUE score of an image (technical quality score)"""
     model_path = os.path.join(MODEL_DIR, "brisque_model_live.yml")
     range_path = os.path.join(MODEL_DIR, "brisque_range_live.yml")
 
@@ -62,6 +64,8 @@ def get_brisque_score(image):
     return score
 
 def setup_aesthetic_predictor():
+    """ load the CLIP model and the aesthetic predictor model"""
+
     CLIP_MODEL_NAME = "openai/clip-vit-large-patch14"
     AESTHETIC_WEIGHTS_PATH = os.path.join(MODEL_DIR, "sac+logos+ava1-l14-linearMSE.pth")
     if not os.path.exists(AESTHETIC_WEIGHTS_PATH):
@@ -84,6 +88,8 @@ def setup_aesthetic_predictor():
     return model_clip, preprocess, predictor, device
 
 def extract_clip_features(image, model_clip, preprocess, device):
+    """ extract CLIP features from an image """
+
     inputs = preprocess(images=image, return_tensors="pt").to(device)
 
     with torch.no_grad():
@@ -101,18 +107,16 @@ def extract_clip_features(image, model_clip, preprocess, device):
     return image_features
 
 def predict_aesthetic_score(image, model_clip, preprocess, predictor, device):
+    """ predict the aesthetic score of an image using laion predictor"""
     with torch.no_grad():
         image_features = extract_clip_features(image, model_clip, preprocess, device)
         score = predictor(image_features)
 
     return score.item()
 
-def get_aesthetic_score(image, model_clip, preprocess, predictor, device):
-    score = predict_aesthetic_score(image, model_clip, preprocess, predictor, device)
-    return score
-
 def get_combined_score(brisque_score, aesthetic_score):
-    
+    """ combine the BRISQUE score and the aesthetic score into a single score between 0 and 100"""
+
     aesthetic_score *= 10
     brisque_score = 100 - brisque_score
 
@@ -120,6 +124,7 @@ def get_combined_score(brisque_score, aesthetic_score):
     return combined_score
 
 def check_similarity_clip(image1, image2, model_clip, preprocess, device):
+    """ check the similarity between two images using CLIP features and cosine similarity"""
     with torch.no_grad():
         features1 = extract_clip_features(image1, model_clip, preprocess, device)
         features2 = extract_clip_features(image2, model_clip, preprocess, device)
@@ -128,6 +133,8 @@ def check_similarity_clip(image1, image2, model_clip, preprocess, device):
     return sim
 
 def check_similarity_hash(image1, image2):
+    """ check the similarity between two images using perceptual hash and hamming distance"""
+
     hash1 = imagehash.phash(image1)
     hash2 = imagehash.phash(image2)
 
@@ -136,11 +143,14 @@ def check_similarity_hash(image1, image2):
     return distance
 
 def pretty_filename(filename):
+    """ return a pretty filename without path and extension"""
     if isinstance(filename, (list, tuple)):
         return [os.path.basename(item) for item in filename]
     return os.path.basename(filename)
 
 def remove_duplicates(image_list):
+    """ remove duplicate images from a list of images using perceptual hash"""
+
     hashes = {}
     for image in image_list:
         filename = image.filename
@@ -153,6 +163,8 @@ def remove_duplicates(image_list):
             hashes[img_hash] = filename
 
 def remove_similar_images(image_list, model_clip, preprocess, device, threshold=0.9, min_imgs=5):
+    """ remove similar images from a list of images using CLIP features and cosine similarity"""
+
     features = {}
     for image in image_list:
         filename = image.filename
@@ -182,6 +194,7 @@ def remove_similar_images(image_list, model_clip, preprocess, device, threshold=
                         image_list.remove(Image.open(filename2))
 
 def clasify_images(image_list, min_imgs=5):
+    """ classify a list of images by removing duplicates, similar images, and calculating BRISQUE and aesthetic scores"""
 
     model_clip, preprocess, predictor, device = setup_aesthetic_predictor()
 
@@ -206,7 +219,7 @@ def clasify_images(image_list, min_imgs=5):
     print(f"\nCalculating aesthetic scores...")
     for filename in tqdm(filenames_cleaned, desc="Analyse Aesthetic", unit="img"):
         image = Image.open(filename)
-        aesthetic_score = get_aesthetic_score(image, model_clip, preprocess, predictor, device)
+        aesthetic_score = predict_aesthetic_score(image, model_clip, preprocess, predictor, device)
         aesthetic_scores[filename] = aesthetic_score
 
     final_filenames = [f for f in aesthetic_scores.keys() if aesthetic_scores[f] > SEUIL_MINIMUM_LAION]
@@ -219,6 +232,8 @@ def clasify_images(image_list, min_imgs=5):
     return brisque_scores, aesthetic_scores, final_scores
 
 def get_top_images(image_list, top_n=5):
+    """ get the top n images from a list of images based on their combined score"""
+
     _, _, final_scores = clasify_images(image_list, min_imgs=top_n)
     sorted_scores = sorted(final_scores.items(), key=lambda item: item[1], reverse=True)
     top_images = [Image.open(filename) for filename, score in sorted_scores[:top_n]]
@@ -226,6 +241,7 @@ def get_top_images(image_list, top_n=5):
     return top_images
 
 def plot_scores(scores, folder_path):
+    """ plot the scores of the images in a folder with their thumbnails"""
 
     filenames = list(scores.keys())
     score_values = list(scores.values())
