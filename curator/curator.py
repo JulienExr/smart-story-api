@@ -22,10 +22,12 @@ import numpy as np
 from transformers import CLIPModel, CLIPProcessor
 from transformers import logging as hf_logging
 from simul_api import api_simul
+from dotenv import load_dotenv
 
+load_dotenv()
 
 MODEL_DIR = os.path.join(BASE_DIR, "model")
-DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "data"))
+DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "smart_crop", "data"))
 
 SEUIL_REJET_BRISQUE = 50.0
 SEUIL_MINIMUM_LAION = 5.0
@@ -79,7 +81,7 @@ def setup_aesthetic_predictor():
     print("CLIP model loaded successfully.")
 
     print(f"Loading aesthetic predictor weights from: {AESTHETIC_WEIGHTS_PATH}...")
-    pt_state = torch.load(AESTHETIC_WEIGHTS_PATH, map_location=device)
+    pt_state = torch.load(AESTHETIC_WEIGHTS_PATH, map_location=device, weights_only=True)
     predictor = AestheticPredictor(768)
     predictor.load_state_dict(pt_state)
     predictor.to(device)
@@ -195,7 +197,6 @@ def remove_similar_images(image_list, model_clip, preprocess, device, threshold=
 
 def clasify_images(image_list, min_imgs=5):
     """ classify a list of images by removing duplicates, similar images, and calculating BRISQUE and aesthetic scores"""
-
     model_clip, preprocess, predictor, device = setup_aesthetic_predictor()
 
     remove_duplicates(image_list)
@@ -212,17 +213,44 @@ def clasify_images(image_list, min_imgs=5):
         brisque_score = get_brisque_score(image)
         brisque_scores[filename] = brisque_score
 
+    sorted_by_brisque = sorted(brisque_scores.items(), key=lambda item: item[1])
 
-    filenames_cleaned = [f for f in brisque_scores.keys() if brisque_scores[f] is not None and brisque_scores[f] < SEUIL_REJET_BRISQUE]
+    if len(sorted_by_brisque) <= min_imgs:
+        filenames_cleaned = [filename for filename, _ in sorted_by_brisque]
+    else:
+        under_threshold = [
+            filename for filename, score in sorted_by_brisque
+            if score is not None and score < SEUIL_REJET_BRISQUE
+        ]
+
+        if len(under_threshold) >= min_imgs:
+            filenames_cleaned = under_threshold
+        else:
+            filenames_cleaned = [filename for filename, _ in sorted_by_brisque[:min_imgs]]
+        
+    
     aesthetic_scores = {}
-
     print(f"\nCalculating aesthetic scores...")
+
     for filename in tqdm(filenames_cleaned, desc="Analyse Aesthetic", unit="img"):
         image = Image.open(filename)
         aesthetic_score = predict_aesthetic_score(image, model_clip, preprocess, predictor, device)
         aesthetic_scores[filename] = aesthetic_score
 
-    final_filenames = [f for f in aesthetic_scores.keys() if aesthetic_scores[f] > SEUIL_MINIMUM_LAION]
+    sorted_aesthetic = sorted(aesthetic_scores.items(), key=lambda item: item[1])
+
+    if len(sorted_aesthetic) <= min_imgs:
+        final_filenames = [filename for filename, _ in sorted_aesthetic]
+    else:         
+        above_threshold = [
+            filename for filename, score in sorted_aesthetic
+            if score is not None and score > SEUIL_MINIMUM_LAION
+        ]
+        if len(above_threshold) >= min_imgs:
+            final_filenames = above_threshold
+        else:             
+            final_filenames = [filename for filename, _ in sorted_aesthetic[-min_imgs:]]
+
     final_scores = {}
     print(f"\nCalculating combined scores...")
     for filename in final_filenames:
@@ -282,7 +310,7 @@ if __name__ == "__main__":
     image_list = api_simul(folder_path)
     print(f"Total images loaded: {len(image_list)}")
 
-    brisque_scores, aesthetic_scores, final_scores = clasify_images(image_list, min_imgs=5)
+    brisque_scores, aesthetic_scores, final_scores = clasify_images(image_list, min_imgs=6)
     brisque_scores = dict(sorted(brisque_scores.items(), key=lambda item: item[1], reverse=True))
     aesthetic_scores = dict(sorted(aesthetic_scores.items(), key=lambda item: item[1], reverse=True))
     final_scores = dict(sorted(final_scores.items(), key=lambda item: item[1], reverse=True))
@@ -295,7 +323,7 @@ if __name__ == "__main__":
     plot_scores(aesthetic_scores, folder_path)
     plot_scores(final_scores, folder_path)
 
-    top_images = get_top_images(image_list, top_n=5)
+    top_images = get_top_images(image_list, top_n=6)
     print("\nTop 5 images:")
 
     for image in top_images:
